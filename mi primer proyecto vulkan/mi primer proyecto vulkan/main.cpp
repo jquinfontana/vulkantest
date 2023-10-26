@@ -20,6 +20,7 @@ const bool enableValidationLayers = true;
 #endif
 
 //parametros de configuracion de la app
+#define PRINT_STATUS
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
@@ -93,17 +94,19 @@ private:
         vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
         std::vector<VkExtensionProperties> extensions(extensionCount);
         vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+#ifdef PRINT_STATUS
         std::cout << "available extensions:\n";
         for (const auto& extension : extensions) {
             std::cout << '\t' << extension.extensionName << '\n';
         }
+
         //imprimo las que necesita glfw
         std::cout << "\nextenciones requeridas por glwf:\n" ;
         for (size_t i = 0; i < glfwExtensionCount; i++)
         {
             std::cout << '\t' << glfwExtensions[i] << '\n';
         }
-
+#endif
         //llamo a la funcion para hacer lo mismo de las extensiones pero con las vl
         if (enableValidationLayers && !checkValidationLayerSupport()) {
             throw std::runtime_error("validation layers requested, but not available!");
@@ -116,10 +119,12 @@ private:
         vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
         std::vector<VkLayerProperties> availableLayers(layerCount);
         vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+#ifdef PRINT_STATUS
         std::cout << "\navailable layers:\n";
         for (const auto& layer : availableLayers) {
             std::cout << '\t' << layer.layerName << '\n';
         }
+#endif
         for (const char* layerName : validationLayers) {
             bool layerFound = false;
             for (const auto& layerProperties : availableLayers) {
@@ -143,10 +148,14 @@ private:
         }
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+#ifdef PRINT_STATUS
         std::cout << "\navailable GPUs:\n";
         for (const auto& device : devices) {
-            std::cout << '\t' << device << '\n';
+            VkPhysicalDeviceProperties deviceProperties;
+            vkGetPhysicalDeviceProperties(device, &deviceProperties);
+            std::cout << '\t' << deviceProperties.deviceName << '\n';
         }
+#endif
         for (const auto& device : devices) {
             if (isDeviceSuitable(device)) {
                 physicalDevice = device;
