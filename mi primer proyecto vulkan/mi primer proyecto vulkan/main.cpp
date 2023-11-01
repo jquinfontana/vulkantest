@@ -11,6 +11,7 @@
 #include <set>
 #include <limits>
 #include <algorithm>
+#include <fstream>
 
 //configuracion validation layers
 const std::vector<const char*> validationLayers = {
@@ -183,6 +184,24 @@ private:
             }
         }
         return true;
+    }
+
+    static std::vector<char> readFile(const std::string& filename) {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open()) {
+            throw std::runtime_error("failed to open file!");
+        }
+
+        size_t fileSize = (size_t)file.tellg();
+        std::vector<char> buffer(fileSize);
+
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
+
+        file.close();
+
+        return buffer;
     }
 
     void pickPhysicalDevice() {
@@ -401,6 +420,11 @@ private:
         }
     }
 
+    void createGraphicsPipeline() {
+        auto vertShaderCode = readFile("shaders/vert.spv");
+        auto fragShaderCode = readFile("shaders/frag.spv");
+    }
+
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
         //elijo formato de color(?
         for (const auto& availableFormat : availableFormats) {
@@ -475,6 +499,7 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        createGraphicsPipeline();
     }
 
     void mainLoop() {
