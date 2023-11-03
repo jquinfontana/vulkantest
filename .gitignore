@@ -399,3 +399,5 @@ FodyWeavers.xsd
 mi primer proyecto vulkan/mi primer proyecto vulkan/mi primer proyecto vulkan.vcxproj
 *.spv
 mi primer proyecto vulkan/mi primer proyecto vulkan/shaders/compile.bat
+mi primer proyecto vulkan/mi primer proyecto vulkan/mi primer proyecto vulkan.vcxproj
+*.vcxproj
