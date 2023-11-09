@@ -12,6 +12,7 @@
 #include <limits>
 #include <algorithm>
 #include <fstream>
+#include <chrono>
 
 //configuracion validation layers
 const std::vector<const char*> validationLayers = {
@@ -86,6 +87,11 @@ private:
 
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffer;
+
+    //objetos de sincronizaci{on (semaforos y vayas)
+    VkSemaphore imageAvailableSemaphore;
+    VkSemaphore renderFinishedSemaphore;
+    VkFence inFlightFence;
 
     //metodos
     void initWindow() {
@@ -448,12 +454,22 @@ private:
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
 
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = 0;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
         VkRenderPassCreateInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         renderPassInfo.attachmentCount = 1;
         renderPassInfo.pAttachments = &colorAttachment;
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
 
         if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
             throw std::runtime_error("failed to create render pass!");
@@ -696,8 +712,68 @@ private:
         }
     }
 
-    void drawFrame() {
+    void createSyncObjects() {
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+            vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create synchronization objects for a frame!");
+        }
+
+    }
+
+    void drawFrame() {
+        //me bloqueo en la vaya
+        vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+        //reset vaya
+        vkResetFences(device, 1, &inFlightFence);
+
+        //tomo una imagen de la swapchain
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+        //borramos el buffer de comandos
+        vkResetCommandBuffer(commandBuffer, /*VkCommandBufferResetFlagBits*/ 0);
+        //lo grabamos
+        recordCommandBuffer(commandBuffer, imageIndex);
+        //envio buffer de comandos
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = waitSemaphores;
+        submitInfo.pWaitDstStageMask = waitStages;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        //indico que semoforo señalar cuando se terminen de ejecutar los comandos
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores;
+        //realizo el envio del buffer y seteo la vaya, para que el host solo pueda escribir en el buffer de comandos cuando ya se haya ejecutado
+        if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit draw command buffer!");
+        }
+
+        //envio de imagen renderizada a la swapchain para su presentación
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        //indicoque voy a esperar po los siguiente semaforos
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = signalSemaphores;
+        //indico la swapchain a la que voy a enviar
+        VkSwapchainKHR swapChains[] = { swapChain };
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapChains;
+        presentInfo.pImageIndices = &imageIndex;
+        //envio imagen
+        vkQueuePresentKHR(presentQueue, &presentInfo);
     }
 
     VkShaderModule createShaderModule(const std::vector<char>& code) {
@@ -726,9 +802,8 @@ private:
     }
 
     VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-        //elijo modo de rellenado del swap chain, en este caso elijo el modo sin tearing, pero que no tenga vertical blanks
         for (const auto& availablePresentMode : availablePresentModes) {
-            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            if (availablePresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR /*VK_PRESENT_MODE_MAILBOX_KHR elijo modo de rellenado del swap chain, en este caso elijo el modo sin tearing, pero que no tenga vertical blanks*/ /*VK_PRESENT_MODE_IMMEDIATE_KHR modo sin vsync*/) {
                 return availablePresentMode;
             }
         }
@@ -793,16 +868,37 @@ private:
         createFramebuffers();
         createCommandPool();
         createCommandBuffer();
+        createSyncObjects();
     }
 
     void mainLoop() {
+        std::cout << "FPS: " << std::endl;
+        int i = 0;
         while (!glfwWindowShouldClose(window)) {
+
+
+
             glfwPollEvents();
+            auto ti = std::chrono::high_resolution_clock::now();
+            drawFrame();
+            auto tf = std::chrono::high_resolution_clock::now();
+
+
+
+            auto duracion = std::chrono::duration_cast<std::chrono::nanoseconds>(tf - ti).count();
+            if (i % 1000 == 0) {
+                std::cout << "                  \r" << int(((double)1000000000) / duracion) << "\r";
+            }
+            i++;
         }
+        vkDeviceWaitIdle(device); //espero a que la gpu termine de procesar antes de liberar todas las estructuras
     }
 
     void cleanup() {
         //vulkan
+        vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
+        vkDestroyFence(device, inFlightFence, nullptr);
         vkDestroyCommandPool(device, commandPool, nullptr);
         for (auto framebuffer : swapChainFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
