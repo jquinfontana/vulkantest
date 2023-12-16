@@ -34,7 +34,11 @@ const uint32_t HEIGHT = 600;
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    //necesito las extensiones de raytracing
+    //VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, no me encuentra la extension, pero en la pagina de amd en la release notes aparece que la soporta desde 2020 y en la bd de mi amigo dice que tambien desde y si abro el programa de vulkan tambi{en
+    VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+    VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME
 };
 
 //definicion de estructuras y funciones auxiliares
@@ -385,15 +389,32 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        //seteamos informacion sobre funciones del dispositivo (ej: shaders)
-        VkPhysicalDeviceFeatures deviceFeatures{};
+        {//RAY TRACING
+            VkPhysicalDeviceProperties2 physicalDeviceProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+            VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtPipelineProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
+            physicalDeviceProperties.pNext = &rtPipelineProperties;
+            vkGetPhysicalDeviceProperties2(physicalDevice, &physicalDeviceProperties);
+
+            //seteamos informacion sobre funciones del dispositivo (ej: shaders)
+            VkPhysicalDeviceFeatures2 features2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+            VkPhysicalDeviceVulkan12Features features12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+            VkPhysicalDeviceVulkan11Features features11{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
+            VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+            VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+            features2.pNext = &features12;
+            features12.pNext = &features11;
+            features11.pNext = &asFeatures;
+            asFeatures.pNext = &rtPipelineFeatures;
+            // Query supported features.
+            vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+        }
 
         //seteamos todo al dispositivo logico
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
-        createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.pEnabledFeatures = nullptr;
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
         if (enableValidationLayers) {
@@ -1007,6 +1028,33 @@ private:
         createVertexBuffer();
         createCommandBuffers();
         createSyncObjects();
+    }
+
+    //RAY TRACING
+    void getAndWrapFunctionFromGPU() {
+        PFN_vkCmdTraceRaysKHR pfn_vkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(device, "vkCmdTraceRaysKHR");
+
+        VKAPI_ATTR void VKAPI_CALL vkCmdTraceRaysKHR(
+            VkCommandBuffer commandBuffer,
+            const VkStridedDeviceAddressRegionKHR * pRaygenShaderBindingTable,
+            const VkStridedDeviceAddressRegionKHR * pMissShaderBindingTable,
+            const VkStridedDeviceAddressRegionKHR * pHitShaderBindingTable,
+            const VkStridedDeviceAddressRegionKHR * pCallableShaderBindingTable,
+            uint32_t width,
+            uint32_t height,
+            uint32_t depth)
+        {
+            assert(pfn_vkCmdTraceRaysKHR);
+            pfn_vkCmdTraceRaysKHR(
+                commandBuffer,
+                pRaygenShaderBindingTable,
+                pMissShaderBindingTable,
+                pHitShaderBindingTable,
+                pCallableShaderBindingTable,
+                width,
+                height,
+                depth);
+        };
     }
 
     void mainLoop() {
